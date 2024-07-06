@@ -1,3 +1,5 @@
+#code for Basic UI
+
 import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QSlider, QPushButton, QVBoxLayout, QHBoxLayout, QWidget, QLabel
 from PyQt5.QtCore import Qt
