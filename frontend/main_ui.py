@@ -1,10 +1,27 @@
 import sys
 import colors
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout
+from PyQt6.QtGui import QPalette, QColor, QPainter
 
 class RoundedRectWidget(QWidget):
+    def __init__(self, color):
+        super().__init__()
+        self.color = QColor(color)
+        self.setAutoFillBackground(False)  # Disable auto fill background
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect()
+        radius = 15  # Set the radius for the rounded corners
+
+        painter.setBrush(self.color)
+        painter.setPen(Qt.GlobalColor.transparent)
+        painter.drawRoundedRect(rect, radius, radius)
+        painter.end()
+
+class RectWidget(QWidget):
     def __init__(self, color):
         super().__init__()
         self.setAutoFillBackground(True)
@@ -16,7 +33,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Summariser")
-        self.setGeometry(100, 100, 1000,800)
+        self.setGeometry(100, 100, 1000, 800)
 
         main_widget = RoundedRectWidget(colors.grey)
         self.setCentralWidget(main_widget)
@@ -24,7 +41,7 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(main_widget)
 
         # Add a top widget with half the height of the window
-        top_widget = RoundedRectWidget(colors.grey)
+        top_widget = RectWidget(colors.grey)
         main_layout.addWidget(top_widget)
 
         # Create a QHBoxLayout for the bottom part
@@ -32,7 +49,7 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(RoundedRectWidget(colors.white))
         bottom_layout.addWidget(RoundedRectWidget(colors.white))
         bottom_layout.setSpacing(25)
-        bottom_layout.setContentsMargins(50,0,50,50)
+        bottom_layout.setContentsMargins(50, 0, 50, 50)
 
         # Add the bottom_layout to a widget
         bottom_widget = QWidget()
