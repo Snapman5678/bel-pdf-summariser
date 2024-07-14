@@ -2,10 +2,12 @@ import sys
 import colors
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy, QPushButton
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy,
+    QPushButton, QSlider
 )
-from PyQt6.QtGui import QPalette, QColor, QPainter, QFont
+from PyQt6.QtGui import QPalette, QColor, QPainter, QFont , QPixmap
 from PyQt6.QtSvgWidgets import QSvgWidget
+
 
 class RoundedRectWidget(QWidget):
     def __init__(self, color):
@@ -24,6 +26,7 @@ class RoundedRectWidget(QWidget):
         painter.drawRoundedRect(rect, radius, radius)
         painter.end()
 
+
 class RectWidget(QWidget):
     def __init__(self, color):
         super().__init__()
@@ -31,6 +34,7 @@ class RectWidget(QWidget):
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, QColor(color))
         self.setPalette(palette)
+
 
 class CustomTextLabel(QLabel):
     def __init__(self, size, font_type, color, text):
@@ -47,6 +51,7 @@ class CustomTextLabel(QLabel):
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
         self.setPalette(palette)
+
 
 class TopWidget(RectWidget):
     def __init__(self, color):
@@ -78,6 +83,7 @@ class TopWidget(RectWidget):
         layout.setVerticalSpacing(2)
 
         self.setLayout(layout)
+
 
 class BottomRightWidget(RoundedRectWidget):
     def __init__(self, color):
@@ -111,7 +117,7 @@ class BottomRightWidget(RoundedRectWidget):
 
         # Subtitle below button
         subtitle1 = CustomTextLabel(12, 'Inter', colors.light_black,
-                                    'Once the summary has been created your file will\nbe deleted automatically.')
+                                    'Once the summary has been created your file will\nbe downloaded automatically.')
         subtitle1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle1, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -139,6 +145,43 @@ class BottomRightWidget(RoundedRectWidget):
 
         layout.addSpacing(20)
 
+        self.setLayout(layout)
+
+
+# Custom slider widget
+class Slider(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QHBoxLayout()
+
+        turtle = QSvgWidget("icons/Min.svg")
+        turtle.setFixedSize(20, 20)
+        layout.addWidget(turtle)
+
+        wheel = QSlider(Qt.Orientation.Horizontal)
+        wheel.setMinimum(0)
+        wheel.setMaximum(2)
+        wheel.setSingleStep(1)
+        wheel.setStyleSheet(
+            """
+            QSlider::groove:horizontal {
+                background: #787880;
+                height: 8px; 
+                border-radius: 4px; 
+            }
+            QSlider::handle:horizontal {
+                background: #B25DC8;
+                width: 20px; 
+                margin: -6px 0; 
+                border-radius: 10px; 
+            }
+            """
+        )
+        layout.addWidget(wheel)
+
+        hare = QSvgWidget("icons/Max.svg")
+        hare.setFixedSize(20, 20)
+        layout.addWidget(hare)
 
         self.setLayout(layout)
 
@@ -150,10 +193,111 @@ class BottomLeftWidget(RoundedRectWidget):
 
     def initUI(self):
         layout = QVBoxLayout()
-        self.setLayout(layout)
+
+        # Button layout
+        button_layout = QHBoxLayout()
+        self.pdf_button = QPushButton("\u2714 PDF")
+        self.word_button = QPushButton("Word")
+
+        # Set default styles
+        self.pdf_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
+        self.word_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+
+        # Connect buttons to functions
+        self.pdf_button.clicked.connect(self.show_pdf_image)
+        self.word_button.clicked.connect(self.show_word_image)
+
+        button_layout.addWidget(self.pdf_button)
+        button_layout.addWidget(self.word_button)
+        button_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        button_layout.setContentsMargins(30,20,0,0)
+        layout.addLayout(button_layout)
+
+        layout.addSpacing(100)
+
         # Add your widgets here
-        label = CustomTextLabel(12, 'Arial', 'black', 'space space space space space space space space')
-        layout.addWidget(label)
+        label1 = CustomTextLabel(20, 'Inter', 'black', 'SELECT THE RANGE')
+        label1.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(label1)
+
+        layout.addSpacing(0)
+
+        # Create a horizontal layout for the slider widget
+        slider_layout = QHBoxLayout()
+        slider_layout.addWidget(Slider())  # Add the Slider widget to the horizontal layout
+        slider_layout.setContentsMargins(20, 0, 20, 0)
+
+        # Add the horizontal layout to the vertical layout of BottomLeftWidget
+        layout.addLayout(slider_layout)
+
+        label2 = CustomTextLabel(12, 'Inter', colors.light_black, 'Files must be in PDF format and under 10 MB')
+        label2.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(label2)
+
+        # Image container
+        self.label_image = QLabel()
+        layout.addWidget(self.label_image)
+
+        # Display the initial image
+        self.show_pdf_image()
+
+        # Limitation section layout
+        limitation_layout = QVBoxLayout()
+
+        # Limitation section labels
+        bottom_label_title = CustomTextLabel(12, 'Inter', 'red', 'NOTE:')
+        bottom_label_title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        bottom_label_title.setFont(QFont('Inter', 12, italic=True,))  # Set italic style here
+        limitation_layout.addWidget(bottom_label_title)
+
+        bottom_label = CustomTextLabel(12, 'Inter', 'black',
+                                       '1. File should be only in English\n2. File must have less than or equal to 50 pages only.\n3. File can only be of Word or PDF format.')
+        bottom_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        bottom_label.setFont(QFont('Inter', 12, italic=True))  # Set italic style here
+        limitation_layout.addWidget(bottom_label)
+
+        # Set spacing between items in limitation_layout
+        limitation_layout.setSpacing(0)
+        limitation_layout.setContentsMargins(15,0,0,20)
+
+        # Add limitation_layout to main layout
+        layout.addLayout(limitation_layout)
+
+        self.setLayout(layout)
+
+    def show_pdf_image(self):
+        self.pdf_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
+        self.pdf_button.setText("\u2714 PDF")
+        self.word_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+        self.word_button.setText("Word")
+
+        # Load and display the PDF image
+        png_path = "assets/Summarised.png"
+        pixmap = QPixmap(png_path)
+        if pixmap.isNull():
+            print(f"Failed to load image: {png_path}")
+        else:
+            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+            self.label_image.setPixmap(pixmap)
+            self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    def show_word_image(self):
+        self.pdf_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+        self.pdf_button.setText("PDF")
+        self.word_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
+        self.word_button.setText("\u2714 Word")
+
+        # Load and display the Word image
+        png_path = "assets/Word.png"
+        pixmap = QPixmap(png_path)
+        if pixmap.isNull():
+            print(f"Failed to load image: {png_path}")
+        else:
+            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+            self.label_image.setPixmap(pixmap)
+            self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -166,9 +310,9 @@ class MainWindow(QMainWindow):
 
         main_layout = QVBoxLayout(main_widget)
 
-        # Add a top widget with half the height of the window
+        # Add a top widget with fixed height
         self.top_widget = TopWidget(colors.grey)
-        main_layout.addWidget(self.top_widget)
+        main_layout.addWidget(self.top_widget, 1)  # Add stretch factor directly here
 
         # Create a QHBoxLayout for the bottom part
         bottom_layout = QHBoxLayout()
@@ -182,14 +326,14 @@ class MainWindow(QMainWindow):
         # Add the bottom_layout to a widget
         bottom_widget = QWidget()
         bottom_widget.setLayout(bottom_layout)
-        main_layout.addWidget(bottom_widget)
+        main_layout.addWidget(bottom_widget, 4)  # Add stretch factor directly here
 
     def resizeEvent(self, event):
-        """Resize the top widget to one-seventh the height of the window."""
         QMainWindow.resizeEvent(self, event)
+
+        # Resize the top widget to maintain fixed height
         top_widget_height = self.height() // 7
         self.top_widget.setFixedHeight(top_widget_height)
-
 
 
 if __name__ == '__main__':
