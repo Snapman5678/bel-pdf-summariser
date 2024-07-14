@@ -1,11 +1,12 @@
 import sys
 import colors
-from PyQt6.QtCore import Qt
+import os
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy,
-    QPushButton, QSlider
+    QPushButton, QSlider, QFileDialog
 )
-from PyQt6.QtGui import QPalette, QColor, QPainter, QFont , QPixmap
+from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap
 from PyQt6.QtSvgWidgets import QSvgWidget
 
 
@@ -85,9 +86,69 @@ class TopWidget(RectWidget):
         self.setLayout(layout)
 
 
+class FileNameWithTick(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.file_name_label = None
+        self.tick_svg = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QHBoxLayout()
+
+        # Tick SVG on the left
+        self.tick_svg = QSvgWidget("icons/Tick.svg")
+        self.tick_svg.setFixedSize(24, 24)  # Set desired size for the tick mark SVG
+        layout.addWidget(self.tick_svg)
+
+        # File name label on the right
+        self.file_name_label = QLabel("")
+        layout.addWidget(self.file_name_label)
+
+        self.setLayout(layout)
+        self.hide()  # Initially hide the widget
+
+    def show_file_info(self, filename):
+        self.file_name_label.setText(os.path.basename(filename))
+        self.file_name_label.setStyleSheet(
+            "font-family: 'Inter'; font-size: 14px; color: black;"  # Adjust size and color as needed
+        )
+        self.show()
+
+    def hide_file_info(self):
+        self.file_name_label.clear()
+        self.hide()
+
+
+class HoverButton(QPushButton):
+    def __init__(self, text):
+        super().__init__(text)
+        self.normal_style = (
+            f"background: none; border: none; border-radius: 8px; font: 16px 'Inter'; color: {colors.purple};"
+        )
+        self.hover_style = (
+            f"background-color: {colors.grey}; border: none; border-radius: 8px;"
+            f"font: 16px 'Inter'; color: {colors.light_purple};"
+        )
+        self.setStyleSheet(self.normal_style)
+        self.setMouseTracking(True)
+        self.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Enter:
+            self.setStyleSheet(self.hover_style)
+        elif event.type() == QEvent.Type.Leave:
+            self.setStyleSheet(self.normal_style)
+        return super().eventFilter(obj, event)
+
+
 class BottomRightWidget(RoundedRectWidget):
-    def __init__(self, color):
+    def __init__(self, parent_layout, color):
         super().__init__(color)
+        self.parent_layout = parent_layout
+        self.file_path = None
+        self.file_label = None
+        self.upload_button = None
         self.initUI()
 
     def initUI(self):
@@ -109,11 +170,17 @@ class BottomRightWidget(RoundedRectWidget):
         layout.addWidget(svg_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Button below file image
-        upload_button = QPushButton("Click or drop a file")
-        upload_button.setStyleSheet(f"background: none; border: none; font: 16px 'Inter'; color: {colors.purple};")
-        layout.addWidget(upload_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.upload_button = HoverButton("Click or drop a file")
+        self.upload_button.clicked.connect(self.open_file_dialog)
+
+        layout.addWidget(self.upload_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.setLayout(layout)
 
         layout.addSpacing(10)
+
+        # Label to display selected file name and tick mark SVG
+        self.file_label = FileNameWithTick()
+        layout.addWidget(self.file_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Subtitle below button
         subtitle1 = CustomTextLabel(12, 'Inter', colors.light_black,
@@ -124,21 +191,27 @@ class BottomRightWidget(RoundedRectWidget):
         # Spacer to push the buttons to the bottom right
         layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
-        # Add clear and summarise buttons at the bottom right
+        # Add clear and summarize buttons at the bottom right
         button_layout = QHBoxLayout()
         button_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
 
         clear_button = QPushButton("Clear")
         clear_button.setStyleSheet(
-            f"background-color: {colors.grey}; color: white; font: 16px 'Inter'; border-radius: 17px; min-width: 120px;min-height:35px;")
+            f"background-color: {colors.grey}; color: white; font: 16px 'Inter';"
+            f"border-radius: 17px; min-width: 120px;min-height:35px;")
         button_layout.addWidget(clear_button)
 
         button_layout.addSpacing(10)
 
         summarise_button = QPushButton("Summarize")
         summarise_button.setStyleSheet(
-            f"background-color: {colors.purple}; color: white; font: 16px 'Inter'; border-radius: 17px; min-width: 120px;min-height:35px;")
+            f"background-color: {colors.purple}; color: white; font: 16px 'Inter';"
+            f"border-radius: 17px; min-width: 120px;min-height:35px;")
         button_layout.addWidget(summarise_button)
+
+        # Connect buttons to slots
+        clear_button.clicked.connect(self.clear_file)
+        summarise_button.clicked.connect(self.summarize_file)
 
         # Add the button layout to the vertical layout
         layout.addLayout(button_layout)
@@ -147,9 +220,50 @@ class BottomRightWidget(RoundedRectWidget):
 
         self.setLayout(layout)
 
+    def open_file_dialog(self):
+        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+        print(downloads_path)
+        pdf_filter = "PDF Files (*.pdf)"
+        word_filter = "Word Files (*.doc *.docx)"
+
+        filter_var = pdf_filter
+        if self.parent_layout.file_type == 1:
+            filter_var = word_filter
+        elif self.parent_layout.file_type == 0:
+            filter_var = pdf_filter
+
+        self.file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open File",
+            downloads_path,
+            filter_var
+        )
+
+        if self.file_path:
+            # Handle the selected file path
+            print(f"Selected file: {self.file_path}")
+            self.show_file_info(self.file_path)
+
+    def show_file_info(self, filename):
+        # TODO: Need to check file limitations logic (need to add a filetype checker python file )
+        self.file_label.show_file_info(filename)
+
+    def clear_file(self):
+        self.file_path = None
+        self.file_label.hide_file_info()
+
+    def summarize_file(self):
+        if self.file_path:
+            # TODO: Implement file summarization logic
+            pass
+        else:
+            print("No file selected.")
+
 
 # Custom slider widget
 class Slider(QWidget):
+    valueChanged = pyqtSignal(int)  # Signal to emit slider value
+
     def __init__(self):
         super().__init__()
         layout = QHBoxLayout()
@@ -158,26 +272,27 @@ class Slider(QWidget):
         turtle.setFixedSize(20, 20)
         layout.addWidget(turtle)
 
-        wheel = QSlider(Qt.Orientation.Horizontal)
-        wheel.setMinimum(0)
-        wheel.setMaximum(2)
-        wheel.setSingleStep(1)
-        wheel.setStyleSheet(
+        self.wheel = QSlider(Qt.Orientation.Horizontal)
+        self.wheel.setMinimum(0)
+        self.wheel.setMaximum(2)
+        self.wheel.setSingleStep(1)
+        self.wheel.setStyleSheet(
             """
             QSlider::groove:horizontal {
                 background: #787880;
-                height: 8px; 
-                border-radius: 4px; 
+                height: 8px;
+                border-radius: 4px;
             }
             QSlider::handle:horizontal {
                 background: #B25DC8;
-                width: 20px; 
-                margin: -6px 0; 
-                border-radius: 10px; 
+                width: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
             }
             """
         )
-        layout.addWidget(wheel)
+        self.wheel.valueChanged.connect(self.emitValueChanged)  # Connect value changed signal
+        layout.addWidget(self.wheel)
 
         hare = QSvgWidget("icons/Max.svg")
         hare.setFixedSize(20, 20)
@@ -185,10 +300,18 @@ class Slider(QWidget):
 
         self.setLayout(layout)
 
+    def emitValueChanged(self):
+        self.valueChanged.emit(self.wheel.value())  # Emit slider value when it changes
+
 
 class BottomLeftWidget(RoundedRectWidget):
-    def __init__(self, color):
+    def __init__(self, parent_layout, color):
         super().__init__(color)
+        self.parent_layout = parent_layout
+        self.pdf_button = None
+        self.word_button = None
+        self.label_image = None
+        self.slider = None
         self.initUI()
 
     def initUI(self):
@@ -210,7 +333,7 @@ class BottomLeftWidget(RoundedRectWidget):
         button_layout.addWidget(self.pdf_button)
         button_layout.addWidget(self.word_button)
         button_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        button_layout.setContentsMargins(30,20,0,0)
+        button_layout.setContentsMargins(30, 20, 0, 0)
         layout.addLayout(button_layout)
 
         layout.addSpacing(100)
@@ -224,10 +347,11 @@ class BottomLeftWidget(RoundedRectWidget):
 
         # Create a horizontal layout for the slider widget
         slider_layout = QHBoxLayout()
-        slider_layout.addWidget(Slider())  # Add the Slider widget to the horizontal layout
-        slider_layout.setContentsMargins(20, 0, 20, 0)
+        self.slider = Slider()
+        self.slider.valueChanged.connect(self.updateSummaryType)  # Connect slider valueChanged signal
+        slider_layout.addWidget(self.slider)
 
-        # Add the horizontal layout to the vertical layout of BottomLeftWidget
+        slider_layout.setContentsMargins(20, 0, 20, 0)
         layout.addLayout(slider_layout)
 
         label2 = CustomTextLabel(12, 'Inter', colors.light_black, 'Files must be in PDF format and under 10 MB')
@@ -247,18 +371,20 @@ class BottomLeftWidget(RoundedRectWidget):
         # Limitation section labels
         bottom_label_title = CustomTextLabel(12, 'Inter', 'red', 'NOTE:')
         bottom_label_title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        bottom_label_title.setFont(QFont('Inter', 12, italic=True,))  # Set italic style here
+        bottom_label_title.setFont(QFont('Inter', 12, italic=True, ))  # Set italic style here
         limitation_layout.addWidget(bottom_label_title)
 
         bottom_label = CustomTextLabel(12, 'Inter', 'black',
-                                       '1. File should be only in English\n2. File must have less than or equal to 50 pages only.\n3. File can only be of Word or PDF format.')
+                                       "1. File should be only in English\n"
+                                       "2. File must have less than or equal to 50 pages only.\n"
+                                       "3. File can only be of Word or PDF format.")
         bottom_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         bottom_label.setFont(QFont('Inter', 12, italic=True))  # Set italic style here
         limitation_layout.addWidget(bottom_label)
 
         # Set spacing between items in limitation_layout
         limitation_layout.setSpacing(0)
-        limitation_layout.setContentsMargins(15,0,0,20)
+        limitation_layout.setContentsMargins(15, 0, 0, 20)
 
         # Add limitation_layout to main layout
         layout.addLayout(limitation_layout)
@@ -281,6 +407,9 @@ class BottomLeftWidget(RoundedRectWidget):
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Set the file_type value
+        self.parent_layout.file_type = 0
+
     def show_word_image(self):
         self.pdf_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
         self.pdf_button.setText("PDF")
@@ -297,6 +426,32 @@ class BottomLeftWidget(RoundedRectWidget):
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Set the file_type value
+        self.parent_layout.file_type = 1
+
+    def updateSummaryType(self, value):
+        self.parent_layout.summary_type = value
+
+
+class BottomLayout(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.file_type: int = 0
+        self.summary_type: int = 0
+        self.bottom_left_widget = None
+        self.bottom_right_widget = None
+        self.initUI()
+
+    def initUI(self):
+        # Create a QHBoxLayout for the bottom part
+        bottom_layout = QHBoxLayout()
+        self.bottom_left_widget = BottomLeftWidget(self, colors.white)
+        self.bottom_right_widget = BottomRightWidget(self, colors.white)
+        bottom_layout.addWidget(self.bottom_left_widget)
+        bottom_layout.addWidget(self.bottom_right_widget)
+        bottom_layout.setSpacing(25)
+        bottom_layout.setContentsMargins(50, 0, 50, 50)
+        self.setLayout(bottom_layout)
 
 
 class MainWindow(QMainWindow):
@@ -314,18 +469,8 @@ class MainWindow(QMainWindow):
         self.top_widget = TopWidget(colors.grey)
         main_layout.addWidget(self.top_widget, 1)  # Add stretch factor directly here
 
-        # Create a QHBoxLayout for the bottom part
-        bottom_layout = QHBoxLayout()
-        self.bottom_left_widget = BottomLeftWidget(colors.white)
-        self.bottom_right_widget = BottomRightWidget(colors.white)
-        bottom_layout.addWidget(self.bottom_left_widget)
-        bottom_layout.addWidget(self.bottom_right_widget)
-        bottom_layout.setSpacing(25)
-        bottom_layout.setContentsMargins(50, 0, 50, 50)
-
         # Add the bottom_layout to a widget
-        bottom_widget = QWidget()
-        bottom_widget.setLayout(bottom_layout)
+        bottom_widget = BottomLayout()
         main_layout.addWidget(bottom_widget, 4)  # Add stretch factor directly here
 
     def resizeEvent(self, event):
