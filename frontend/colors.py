@@ -7,6 +7,4 @@ light_black = "#605454"
 red = "#F10D0D"
 button_black = "#2C2C2C;"
 button_grey = "#F5F5F5;"
-
-
-
+light_grey = "#E0E0E0"

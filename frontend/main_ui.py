@@ -53,7 +53,6 @@ class CustomTextLabel(QLabel):
         palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
         self.setPalette(palette)
 
-
 class TopWidget(RectWidget):
     def __init__(self, color):
         super().__init__(color)
@@ -130,16 +129,29 @@ class HoverButton(QPushButton):
             f"background-color: {colors.grey}; border: none; border-radius: 8px;"
             f"font: 16px 'Inter'; color: {colors.light_purple};"
         )
+        self.disabled_style = (
+            f"border: none; border-radius: 8px;"
+            f"font: 16px 'Inter'; color: {colors.light_grey};"
+        )
         self.setStyleSheet(self.normal_style)
         self.setMouseTracking(True)
         self.installEventFilter(self)
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Enter:
-            self.setStyleSheet(self.hover_style)
-        elif event.type() == QEvent.Type.Leave:
-            self.setStyleSheet(self.normal_style)
+        if self.isEnabled():
+            if event.type() == QEvent.Type.Enter:
+                self.setStyleSheet(self.hover_style)
+            elif event.type() == QEvent.Type.Leave:
+                self.setStyleSheet(self.normal_style)
         return super().eventFilter(obj, event)
+
+    def disable_button(self):
+        self.setDisabled(True)
+        self.setStyleSheet(self.disabled_style)
+
+    def enable_button(self):
+        self.setDisabled(False)
+        self.setStyleSheet(self.normal_style)
 
 
 class BottomRightWidget(RoundedRectWidget):
@@ -157,7 +169,7 @@ class BottomRightWidget(RoundedRectWidget):
         layout.addSpacing(30)
 
         # Add title at the top center
-        title = CustomTextLabel(18, 'Inter', 'black', 'UPLOAD YOUR PDF FILE HERE')
+        title = CustomTextLabel(18, 'Inter', 'black', 'UPLOAD YOUR FILE HERE')
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
@@ -247,10 +259,12 @@ class BottomRightWidget(RoundedRectWidget):
     def show_file_info(self, filename):
         # TODO: Need to check file limitations logic (need to add a filetype checker python file )
         self.file_label.show_file_info(filename)
+        self.upload_button.disable_button()
 
     def clear_file(self):
         self.file_path = None
         self.file_label.hide_file_info()
+        self.upload_button.enable_button()
 
     def summarize_file(self):
         if self.file_path:
@@ -311,6 +325,7 @@ class BottomLeftWidget(RoundedRectWidget):
         self.pdf_button = None
         self.word_button = None
         self.label_image = None
+        self.label2 = None
         self.slider = None
         self.initUI()
 
@@ -354,9 +369,9 @@ class BottomLeftWidget(RoundedRectWidget):
         slider_layout.setContentsMargins(20, 0, 20, 0)
         layout.addLayout(slider_layout)
 
-        label2 = CustomTextLabel(12, 'Inter', colors.light_black, 'Files must be in PDF format and under 10 MB')
-        label2.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(label2)
+        self.label2 = CustomTextLabel(12, 'Inter', colors.light_black, 'Files must be in PDF format and under 10 MB')
+        self.label2.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.label2)
 
         # Image container
         self.label_image = QLabel()
@@ -397,6 +412,8 @@ class BottomLeftWidget(RoundedRectWidget):
         self.word_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
         self.word_button.setText("Word")
 
+        self.label2.setText("Files must be in PDF format and under 10 MB")
+
         # Load and display the PDF image
         png_path = "assets/Summarised.png"
         pixmap = QPixmap(png_path)
@@ -416,6 +433,8 @@ class BottomLeftWidget(RoundedRectWidget):
         self.word_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
         self.word_button.setText("\u2714 Word")
 
+        self.label2.setText("Files must be in Word format and under 10 MB")
+
         # Load and display the Word image
         png_path = "assets/Word.png"
         pixmap = QPixmap(png_path)
@@ -431,7 +450,6 @@ class BottomLeftWidget(RoundedRectWidget):
 
     def updateSummaryType(self, value):
         self.parent_layout.summary_type = value
-
 
 class BottomLayout(QWidget):
     def __init__(self):
@@ -470,8 +488,8 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.top_widget, 1)  # Add stretch factor directly here
 
         # Add the bottom_layout to a widget
-        bottom_widget = BottomLayout()
-        main_layout.addWidget(bottom_widget, 4)  # Add stretch factor directly here
+        self.bottom_widget = BottomLayout()
+        main_layout.addWidget(self.bottom_widget, 4)  # Add stretch factor directly here
 
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
@@ -479,6 +497,8 @@ class MainWindow(QMainWindow):
         # Resize the top widget to maintain fixed height
         top_widget_height = self.height() // 7
         self.top_widget.setFixedHeight(top_widget_height)
+
+
 
 
 if __name__ == '__main__':
