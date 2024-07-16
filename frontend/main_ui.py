@@ -4,10 +4,11 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy,
-    QPushButton, QSlider, QFileDialog
+    QPushButton, QSlider, QFileDialog, QMessageBox
 )
 from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap
 from PyQt6.QtSvgWidgets import QSvgWidget
+from extraction import FileChecker, TextExtractor
 
 
 class RoundedRectWidget(QWidget):
@@ -52,6 +53,7 @@ class CustomTextLabel(QLabel):
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
         self.setPalette(palette)
+
 
 class TopWidget(RectWidget):
     def __init__(self, color):
@@ -161,6 +163,7 @@ class BottomRightWidget(RoundedRectWidget):
         self.file_path = None
         self.file_label = None
         self.upload_button = None
+        self.output_path = 'raw_text.txt'
         self.initUI()
 
     def initUI(self):
@@ -258,6 +261,34 @@ class BottomRightWidget(RoundedRectWidget):
 
     def show_file_info(self, filename):
         # TODO: Need to check file limitations logic (need to add a filetype checker python file )
+
+        file_checker = FileChecker(filename)
+        file_type = self.parent_layout.file_type  # 0 if PDF, 1 if DOCX
+
+        if file_type == 0:
+            is_valid, message = file_checker.check_pdf()
+        else:
+            is_valid, message = file_checker.check_docx()
+
+        if not is_valid:
+            error_box = QMessageBox()
+            error_box.setIcon(QMessageBox.Icon.Warning)
+            error_box.setText(message)
+            error_box.setWindowTitle("File Error")
+            error_box.exec()
+            return
+
+        text_extractor = TextExtractor(self.output_path)
+        success = text_extractor.save_text(file_checker.extracted_text)
+
+        if not success:
+            error_box = QMessageBox()
+            error_box.setIcon(QMessageBox.Icon.Warning)
+            error_box.setText("Failed to save extracted text from the document.")
+            error_box.setWindowTitle("Extraction Error")
+            error_box.exec()
+            return
+
         self.file_label.show_file_info(filename)
         self.upload_button.disable_button()
 
@@ -265,6 +296,12 @@ class BottomRightWidget(RoundedRectWidget):
         self.file_path = None
         self.file_label.hide_file_info()
         self.upload_button.enable_button()
+
+        try:
+            with open(self.output_path, 'w') as f:
+                f.truncate(0)  # Truncate the file to clear its contents
+        except Exception as e:
+            print(f"Error clearing output file: {str(e)}")
 
     def summarize_file(self):
         if self.file_path:
@@ -451,6 +488,7 @@ class BottomLeftWidget(RoundedRectWidget):
     def updateSummaryType(self, value):
         self.parent_layout.summary_type = value
 
+
 class BottomLayout(QWidget):
     def __init__(self):
         super().__init__()
@@ -491,6 +529,8 @@ class MainWindow(QMainWindow):
         self.bottom_widget = BottomLayout()
         main_layout.addWidget(self.bottom_widget, 4)  # Add stretch factor directly here
 
+        app.aboutToQuit.connect(self.clear_file_on_exit)
+
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
 
@@ -498,7 +538,18 @@ class MainWindow(QMainWindow):
         top_widget_height = self.height() // 7
         self.top_widget.setFixedHeight(top_widget_height)
 
-
+    def clear_file_on_exit(self):
+        # Code to clear the file if it contains text
+        output_path = 'raw_text.txt'
+        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+            try:
+                with open(output_path, 'w') as f:
+                    f.truncate(0)  # Clear the file contents
+                print(f"Cleared {output_path} on application exit.")
+            except Exception as e:
+                print(f"Error clearing {output_path}: {e}")
+        else:
+            print(f"{output_path} is either empty or does not exist, no action taken.")
 
 
 if __name__ == '__main__':
