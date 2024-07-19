@@ -48,9 +48,24 @@ class SummarizationEngine:
 
     def extractive_summarize(self, text, num_sentences):
         sentences = sent_tokenize(text)
+        if len(sentences) <= 1:
+            return text  # Return the original text if it's too short
+        
         similarity_matrix = self.build_similarity_matrix(sentences)
+        
+        # Ensure that the similarity matrix is not too sparse
+        if np.count_nonzero(similarity_matrix) == 0:
+            return text  # Return the original text if similarity matrix is empty
+        
         nx_graph = nx.from_numpy_array(similarity_matrix)
-        scores = nx.pagerank(nx_graph)
+        
+        # Increase the number of iterations if necessary
+        try:
+            scores = nx.pagerank(nx_graph, max_iter=200)
+        except nx.NetworkXError as e:
+            print(f"Error during PageRank computation: {e}")
+            return text  # Return the original text if PageRank fails
+        
         ranked_sentences = sorted(((scores[i], s) for i, s in enumerate(sentences)), reverse=True)
         return " ".join([ranked_sentences[i][1] for i in range(min(num_sentences, len(ranked_sentences)))])
 
