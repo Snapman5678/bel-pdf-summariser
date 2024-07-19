@@ -1,7 +1,7 @@
 import sys
 import colors
 import os
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent,QFileInfo
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy,
     QPushButton, QSlider, QFileDialog, QMessageBox
@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap
 from PyQt6.QtSvgWidgets import QSvgWidget
 from extraction import FileChecker, TextExtractor
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class RoundedRectWidget(QWidget):
@@ -72,7 +74,7 @@ class TopWidget(RectWidget):
         layout.addWidget(title_text, 1, 0)
 
         # Add SVG image to the top right
-        svg_widget = QSvgWidget("icons/Menu_toggle.svg")
+        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Menu_toggle.svg"))
         svg_widget.setFixedSize(25, 25)  # Set the desired size of the SVG image
         layout.addWidget(svg_widget, 0, 2, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
 
@@ -98,7 +100,7 @@ class FileNameWithTick(QWidget):
         layout = QHBoxLayout()
 
         # Tick SVG on the left
-        self.tick_svg = QSvgWidget("icons/Tick.svg")
+        self.tick_svg = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Tick.svg"))
         self.tick_svg.setFixedSize(24, 24)  # Set desired size for the tick mark SVG
         layout.addWidget(self.tick_svg)
 
@@ -180,7 +182,7 @@ class BottomRightWidget(RoundedRectWidget):
         layout.addSpacing(100)  # Adjust the amount of spacing as needed
 
         # File Image in the center
-        svg_widget = QSvgWidget("icons/File.svg")
+        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons","File.svg"))
         svg_widget.setFixedSize(197, 207)  # Set the desired size of the SVG image
         layout.addWidget(svg_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -319,7 +321,7 @@ class Slider(QWidget):
         super().__init__()
         layout = QHBoxLayout()
 
-        turtle = QSvgWidget("icons/Min.svg")
+        turtle = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Min.svg"))
         turtle.setFixedSize(20, 20)
         layout.addWidget(turtle)
 
@@ -345,7 +347,7 @@ class Slider(QWidget):
         self.wheel.valueChanged.connect(self.emitValueChanged)  # Connect value changed signal
         layout.addWidget(self.wheel)
 
-        hare = QSvgWidget("icons/Max.svg")
+        hare = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Max.svg"))
         hare.setFixedSize(20, 20)
         layout.addWidget(hare)
 
@@ -452,7 +454,7 @@ class BottomLeftWidget(RoundedRectWidget):
         self.label2.setText("Files must be in PDF format and under 10 MB")
 
         # Load and display the PDF image
-        png_path = "assets/Summarised.png"
+        png_path = os.path.join(SCRIPT_DIR, "assets","Summarised.png")
         pixmap = QPixmap(png_path)
         if pixmap.isNull():
             print(f"Failed to load image: {png_path}")
@@ -473,7 +475,7 @@ class BottomLeftWidget(RoundedRectWidget):
         self.label2.setText("Files must be in Word format and under 10 MB")
 
         # Load and display the Word image
-        png_path = "assets/Word.png"
+        png_path = os.path.join(SCRIPT_DIR, "assets","Word.png")
         pixmap = QPixmap(png_path)
         if pixmap.isNull():
             print(f"Failed to load image: {png_path}")
@@ -513,9 +515,11 @@ class BottomLayout(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
         self.setWindowTitle("Summariser")
         self.setGeometry(100, 100, 1000, 800)
 
+        # Assuming RoundedRectWidget, TopWidget, BottomLayout are defined elsewhere
         main_widget = RoundedRectWidget(colors.grey)
         self.setCentralWidget(main_widget)
 
@@ -550,6 +554,7 @@ class MainWindow(QMainWindow):
                 print(f"Error clearing {output_path}: {e}")
         else:
             print(f"{output_path} is either empty or does not exist, no action taken.")
+    
 
 
 if __name__ == '__main__':
