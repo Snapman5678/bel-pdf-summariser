@@ -311,16 +311,21 @@ class BottomRightWidget(RoundedRectWidget):
             try:
                 # Retrieve the summary level from the parent layout or UI element
                 summary_level = self.parent_layout.summary_type  # Adjust this according to your actual UI implementation
+                summary_levels = {
+                    0: 'low',
+                    1: 'medium',
+                    2: 'high'
+                    }
             
                 # Read the text from the file
-                with open(self.file_path, 'r', encoding='utf-8') as file:
+                with open(self.file_path, 'r', encoding='latin-1') as file:
                     text = file.read()
             
                 # Initialize the summarization engine
                 summarizer = SummarizationEngine()
 
                 # Get the summary based on the desired level
-                summary = summarizer.get_summary(text, summary_level)
+                summary = summarizer.get_summary(text, summary_levels[summary_level])
     
                 # Write the summary to summary_output.txt
                 output_file_path = 'summary_output.txt'
