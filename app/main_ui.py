@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap
 from PyQt6.QtSvgWidgets import QSvgWidget
 from extraction import FileChecker, TextExtractor
+from summarizer import SummarizationEngine
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -307,10 +308,32 @@ class BottomRightWidget(RoundedRectWidget):
 
     def summarize_file(self):
         if self.file_path:
-            # TODO: Implement file summarization logic
-            pass
+            try:
+                # Retrieve the summary level from the parent layout or UI element
+                summary_level = self.parent_layout.summary_type  # Adjust this according to your actual UI implementation
+            
+                # Read the text from the file
+                with open(self.file_path, 'r', encoding='utf-8') as file:
+                    text = file.read()
+            
+                # Initialize the summarization engine
+                summarizer = SummarizationEngine()
+
+                # Get the summary based on the desired level
+                summary = summarizer.get_summary(text, summary_level)
+    
+                # Write the summary to summary_output.txt
+                output_file_path = 'summary_output.txt'
+                with open(output_file_path, 'w', encoding='utf-8') as output_file:
+                    output_file.write(summary)
+                    
+                print(f"Summary written to {output_file_path}")
+
+            except Exception as e:
+                print(f"An error occurred: {e}")
         else:
             print("No file selected.")
+
 
 
 # Custom slider widget
