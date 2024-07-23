@@ -1,11 +1,12 @@
 import os
+import logging
 import fitz  # PyMuPDF
+from io import StringIO
 from docx import Document
 from langdetect import detect, LangDetectException
-from io import StringIO
-import logging
+import multiprocessing
+import torch
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -16,6 +17,7 @@ class FileChecker:
         self.file_path = file_path
         self.max_pages = max_pages
         self.extracted_text = StringIO()
+        self.total_pages = 0
 
     def is_english(self, text):
         try:
@@ -26,11 +28,11 @@ class FileChecker:
     def check_pdf(self):
         try:
             doc = fitz.open(self.file_path)
-            total_pages = len(doc)
-            if total_pages > self.max_pages:
+            self.total_pages = len(doc)
+            if self.total_pages > self.max_pages:
                 return False, f"PDF exceeds {self.max_pages} pages."
 
-            for page_number in range(total_pages):
+            for page_number in range(self.total_pages):
                 page = doc.load_page(page_number)
                 text = page.get_text("text")
                 if not text:
@@ -72,6 +74,8 @@ class FileChecker:
                 text_buffer.write(para.text + "\n")
 
             text = text_buffer.getvalue()
+            self.total_pages = page_count // 2  # Rough estimate for DOCX
+
             if not self.is_english(text):
                 return False, "The document is not in English."
 
@@ -102,6 +106,8 @@ class FileChecker:
                 text_buffer.write(para + "\n")
 
             text = text_buffer.getvalue()
+            self.total_pages = page_count // 2  # Rough estimate for DOC
+
             doc.Close(False)
             word.Quit()
 
@@ -147,3 +153,36 @@ class TextExtractor:
     def clear_text(self):
         self.text.truncate(0)  # Clear the text buffer
         self.text.seek(0)
+
+
+class TextPreprocessor:
+    def __init__(self):
+        pass
+
+    def preprocess(self, text):
+        # Implement text preprocessing steps here
+        # For example: lowercasing, removing special characters, tokenization, etc.
+        preprocessed_text = text.lower()
+        preprocessed_text = "".join(
+            [char for char in preprocessed_text if char.isalnum() or char.isspace()]
+        )
+        return preprocessed_text
+
+    def process_in_parallel(self, text, n_processes):
+        # Split text into chunks and process in parallel
+        chunks = text.split(
+            "\n\n"
+        )  # Assuming paragraphs are separated by double newlines
+        pool = multiprocessing.Pool(processes=n_processes)
+        preprocessed_chunks = pool.map(self.preprocess, chunks)
+        pool.close()
+        pool.join()
+        return "\n\n".join(preprocessed_chunks)
+
+
+class SystemChecker:
+    @staticmethod
+    def check_hardware():
+        gpu_available = torch.cuda.is_available()
+        cpu_cores = multiprocessing.cpu_count()
+        return gpu_available, cpu_cores

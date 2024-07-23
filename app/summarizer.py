@@ -102,7 +102,7 @@ class SummarizationEngine:
         summary = self.tokenizer.decode(summary_ids[0], skip_special_tokens=True)
         return summary
 
-    def get_summary(self, text, level):
+    def get_summary(self, text, total_pages, level):
         total_words = len(text.split())
 
         extractive_sentences = {"low": 3, "medium": 5, "high": 7}.get(level.lower(), 5)
@@ -115,13 +115,16 @@ class SummarizationEngine:
 
         min_length = max(50, max_length // 2)
 
-        # extractive summarization
-        extractive_summary = self.extractive_summarize(text, extractive_sentences)
-
-        # abstractive summarization on the extractive summary
-        final_summary = self.abstractive_summarize(
-            extractive_summary, max_length, min_length
-        )
+        if total_pages < 10:
+            # Only abstractive summarization
+            final_summary = self.abstractive_summarize(text, max_length, min_length)
+        else:
+            # Extractive summarization
+            extractive_summary = self.extractive_summarize(text, extractive_sentences)
+            # Abstractive summarization on the extractive summary
+            final_summary = self.abstractive_summarize(
+                extractive_summary, max_length, min_length
+            )
 
         # Ensure the summary ends with a complete sentence
         sentences = sent_tokenize(final_summary)

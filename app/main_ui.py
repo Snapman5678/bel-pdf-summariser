@@ -1,3 +1,4 @@
+import re
 import sys
 import colors
 import os
@@ -20,8 +21,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap, QPen
 from PyQt6.QtSvgWidgets import QSvgWidget
-from extraction import FileChecker, TextExtractor
+from extraction import FileChecker, TextExtractor, TextPreprocessor, SystemChecker
 from summarizer import SummarizationEngine
+import concurrent.futures
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -230,7 +232,10 @@ class FileNameWithSpinner(QWidget):
 class HoverButton(QPushButton):
     def __init__(self, text):
         super().__init__(text)
-        self.normal_style = f"background: none; border: none; border-radius: 8px; font: 16px 'Inter'; color: {colors.purple};"
+        self.normal_style = (
+            f"background: none; border: none; border-radius: 8px; "
+            f"font: 16px 'Inter'; color: {colors.purple};"
+        )
         self.hover_style = (
             f"background-color: {colors.grey}; border: none; border-radius: 8px;"
             f"font: 16px 'Inter'; color: {colors.light_purple};"
@@ -264,15 +269,44 @@ class SummarizationWorker(QThread):
     summarization_done = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, text, summary_level):
+    def __init__(self, text, total_pages, summary_level, n_processes):
         super().__init__()
         self.text = text
+        self.total_pages = total_pages
         self.summary_level = summary_level
+        self.n_processes = n_processes
+        self.preprocessor = TextPreprocessor()
 
     def run(self):
         try:
+            # Preprocess text
+            if self.n_processes > 1:
+                text = self.preprocessor.process_in_parallel(
+                    self.text, self.n_processes
+                )
+            else:
+                text = self.preprocessor.preprocess(self.text)
+
+            # Check system hardware
+            gpu_available, cpu_cores = SystemChecker.check_hardware()
+
             summarizer = SummarizationEngine()
-            summary = summarizer.get_summary(self.text, self.summary_level)
+            if gpu_available:
+                # Use GPU for summarization
+                summary = summarizer.get_summary(
+                    text, self.total_pages, self.summary_level
+                )
+            else:
+                # Use CPU for summarization
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        summarizer.get_summary,
+                        text,
+                        self.total_pages,
+                        self.summary_level,
+                    )
+                    summary = future.result()
+
             self.summarization_done.emit(summary)
         except Exception as e:
             self.error_occurred.emit(str(e))
@@ -286,6 +320,7 @@ class BottomRightWidget(RoundedRectWidget):
         self.file_label = None
         self.file_name_with_spinner = FileNameWithSpinner()
         self.upload_button = None
+        self.worker = None
         self.text_extractor = (
             TextExtractor()
         )  # Initialize the TextExtractor without a file path
@@ -445,15 +480,29 @@ class BottomRightWidget(RoundedRectWidget):
                 )  # Adjust this according to your actual UI implementation
                 summary_levels = {0: "low", 1: "medium", 2: "high"}
 
-                # Get the text from the in-memory text extractor
-                text = self.text_extractor.get_text()
+                # Check the file and extract text
+                file_checker = FileChecker(self.file_path)
+                valid, message = file_checker.check_file()
+                if not valid:
+                    logging.error(message)
+                    return
+
+                # Get the text from the file checker
+                text = file_checker.extracted_text.getvalue()
+                total_pages = file_checker.total_pages
 
                 # Hide the tick mark widget and show the spinner
                 self.file_label.hide_file_info()
                 self.file_name_with_spinner.start_loading()
 
+                # Check system hardware
+                gpu_available, cpu_cores = SystemChecker.check_hardware()
+                n_processes = cpu_cores if not gpu_available else 1
+
                 # Create and start the worker thread
-                self.worker = SummarizationWorker(text, summary_levels[summary_level])
+                self.worker = SummarizationWorker(
+                    text, total_pages, summary_levels[summary_level], n_processes
+                )
                 self.worker.summarization_done.connect(self.handle_summary_done)
                 self.worker.error_occurred.connect(self.handle_summary_error)
                 self.worker.start()
@@ -464,24 +513,32 @@ class BottomRightWidget(RoundedRectWidget):
             logging.info("No file selected.")
 
     def handle_summary_done(self, summary):
-        # Extract the first word from the file name
+        # Extract the base name of the file path
         base_name = os.path.basename(self.file_path)
-        first_word = base_name.split()[0] if base_name else "summary"
+
+        # Use regular expressions to find the first "word"
+        match = re.search(r"\w+", base_name)
+        first_word = match.group(0) if match else "summary"
 
         # Create the output file name with _summarised prefix
         output_file_name = f"{first_word}_summarised.txt"
-        # use for production of app
-        # downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
 
-        # use for testing summariser
-        downloads_path = SCRIPT_DIR
+        # Use for production of app
+        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+        # Use for testing summariser
+        # downloads_path = SCRIPT_DIR
+
         output_file_path = os.path.join(downloads_path, output_file_name)
 
         # Write the summary to the file
-        with open(output_file_path, "w", encoding="utf-8") as output_file:
-            output_file.write(summary)
-
-        logging.info(f"Summary written to {output_file_path}")
+        try:
+            with open(output_file_path, "w", encoding="utf-8") as output_file:
+                output_file.write(summary)
+            logging.info(f"Summary written to {output_file_path}")
+        except IOError as e:
+            logging.error(f"Failed to write summary to file: {e}")
+            self.handle_summary_error("Failed to write summary to file.")
 
         # Stop the spinner and show the tick mark widget
         self.file_name_with_spinner.stop_loading()
@@ -654,6 +711,16 @@ class BottomLeftWidget(RoundedRectWidget):
 
         self.setLayout(layout)
 
+    @staticmethod
+    def load_and_scale_pixmap(png_path):
+        pixmap = QPixmap(png_path)
+        if pixmap.isNull():
+            logging.error(f"Failed to load image: {png_path}")
+        else:
+            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+            return pixmap
+        return None
+
     def show_pdf_image(self):
         self.pdf_button.setStyleSheet(
             f"background-color: {colors.button_black}; color: white;"
@@ -668,16 +735,10 @@ class BottomLeftWidget(RoundedRectWidget):
 
         # Load and display the PDF image
         png_path = os.path.join(SCRIPT_DIR, "assets", "Summarised.png")
-        pixmap = QPixmap(png_path)
-        if pixmap.isNull():
-            logging.error(f"Failed to load image: {png_path}")
-        else:
-            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+        pixmap = self.load_and_scale_pixmap(png_path)
+        if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Set the file_type value
-        self.parent_layout.file_type = 0
 
     def show_word_image(self):
         self.pdf_button.setStyleSheet(
@@ -693,11 +754,8 @@ class BottomLeftWidget(RoundedRectWidget):
 
         # Load and display the Word image
         png_path = os.path.join(SCRIPT_DIR, "assets", "Word.png")
-        pixmap = QPixmap(png_path)
-        if pixmap.isNull():
-            logging.error(f"Failed to load image: {png_path}")
-        else:
-            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+        pixmap = self.load_and_scale_pixmap(png_path)
+        if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
