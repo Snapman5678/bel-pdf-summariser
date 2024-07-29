@@ -21,8 +21,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap, QPen
 from PyQt6.QtSvgWidgets import QSvgWidget
-from extraction import FileChecker, TextExtractor, TextPreprocessor, SystemChecker
-from summarizer import SummarizationEngine
+from extraction import FileChecker, TextExtractor, SystemChecker
+from SummaryEngine import SummarizationPipeline
+from multiprocessing import freeze_support
 import concurrent.futures
 
 logging.basicConfig(
@@ -275,36 +276,22 @@ class SummarizationWorker(QThread):
         self.total_pages = total_pages
         self.summary_level = summary_level
         self.n_processes = n_processes
-        self.preprocessor = TextPreprocessor()
+        self.pipeline = SummarizationPipeline()
 
     def run(self):
         try:
-            # Preprocess text
-            if self.n_processes > 1:
-                text = self.preprocessor.process_in_parallel(
-                    self.text, self.n_processes
-                )
-            else:
-                text = self.preprocessor.preprocess(self.text)
-
             # Check system hardware
-            gpu_available, cpu_cores = SystemChecker.check_hardware()
+            gpu_available, _ = SystemChecker.check_hardware()
+            device = 'cuda' if gpu_available else 'cpu'
 
-            summarizer = SummarizationEngine()
+            # Summarize the text
             if gpu_available:
                 # Use GPU for summarization
-                summary = summarizer.get_summary(
-                    text, self.total_pages, self.summary_level
-                )
+                summary = self.pipeline.summarize(self.text, self.summary_level, device=device)
             else:
                 # Use CPU for summarization
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        summarizer.get_summary,
-                        text,
-                        self.total_pages,
-                        self.summary_level,
-                    )
+                    future = executor.submit(self.pipeline.summarize, self.text, self.summary_level, device=device)
                     summary = future.result()
 
             self.summarization_done.emit(summary)
@@ -324,6 +311,7 @@ class BottomRightWidget(RoundedRectWidget):
         self.text_extractor = (
             TextExtractor()
         )  # Initialize the TextExtractor without a file path
+        self.pipeline = SummarizationPipeline()
         self.initUI()
 
     def initUI(self):
@@ -474,26 +462,24 @@ class BottomRightWidget(RoundedRectWidget):
     def summarize_file(self):
         if self.file_path:
             try:
-                # Retrieve the summary level from the parent layout or UI element
-                summary_level = (
-                    self.parent_layout.summary_type
-                )  # Adjust this according to your actual UI implementation
-                summary_levels = {0: "low", 1: "medium", 2: "high"}
+                # Hide the tick mark widget and show the spinner immediately
+                self.file_label.hide_file_info()
+                self.file_name_with_spinner.start_loading()
+
+                summary_level = self.parent_layout.summary_type
+                summary_levels = {0: "short", 1: "medium", 2: "long"}
 
                 # Check the file and extract text
                 file_checker = FileChecker(self.file_path)
                 valid, message = file_checker.check_file()
                 if not valid:
                     logging.error(message)
+                    self.file_name_with_spinner.stop_loading()  # Stop spinner if file is invalid
                     return
 
                 # Get the text from the file checker
                 text = file_checker.extracted_text.getvalue()
                 total_pages = file_checker.total_pages
-
-                # Hide the tick mark widget and show the spinner
-                self.file_label.hide_file_info()
-                self.file_name_with_spinner.start_loading()
 
                 # Check system hardware
                 gpu_available, cpu_cores = SystemChecker.check_hardware()
@@ -501,7 +487,10 @@ class BottomRightWidget(RoundedRectWidget):
 
                 # Create and start the worker thread
                 self.worker = SummarizationWorker(
-                    text, total_pages, summary_levels[summary_level], n_processes
+                    text,
+                    total_pages,
+                    summary_levels[summary_level],
+                    n_processes
                 )
                 self.worker.summarization_done.connect(self.handle_summary_done)
                 self.worker.error_occurred.connect(self.handle_summary_error)
@@ -509,6 +498,7 @@ class BottomRightWidget(RoundedRectWidget):
 
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
+                self.file_name_with_spinner.stop_loading()  # Stop spinner if an error occurs
         else:
             logging.info("No file selected.")
 
@@ -817,6 +807,7 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    freeze_support()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
