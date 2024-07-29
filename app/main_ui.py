@@ -1,14 +1,36 @@
+import re
 import sys
 import colors
 import os
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+import logging
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QThread, QTimer
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QGridLayout, QSpacerItem, QSizePolicy,
-    QPushButton, QSlider, QFileDialog, QMessageBox
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QLabel,
+    QGridLayout,
+    QSpacerItem,
+    QSizePolicy,
+    QPushButton,
+    QSlider,
+    QFileDialog,
+    QMessageBox,
 )
-from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap
+from PyQt6.QtGui import QPalette, QColor, QPainter, QFont, QPixmap, QPen
 from PyQt6.QtSvgWidgets import QSvgWidget
-from extraction import FileChecker, TextExtractor
+from extraction import FileChecker, TextExtractor, SystemChecker
+from SummaryEngine import SummarizationPipeline
+from multiprocessing import freeze_support
+import concurrent.futures
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class RoundedRectWidget(QWidget):
@@ -64,21 +86,36 @@ class TopWidget(RectWidget):
         layout = QGridLayout()
 
         # Add title
-        title = CustomTextLabel(30, 'Inter', 'black', 'Content Summarizer')
+        title = CustomTextLabel(30, "Inter", "black", "Content Summarizer")
         layout.addWidget(title, 0, 0)
 
         # Add subtitle
-        title_text = CustomTextLabel(16, 'Inter', 'black', 'Get the gist of any content with one click')
+        title_text = CustomTextLabel(
+            16, "Inter", "black", "Get the gist of any content with one click"
+        )
         layout.addWidget(title_text, 1, 0)
 
         # Add SVG image to the top right
-        svg_widget = QSvgWidget("icons/Menu_toggle.svg")
+        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Menu_toggle.svg"))
         svg_widget.setFixedSize(25, 25)  # Set the desired size of the SVG image
-        layout.addWidget(svg_widget, 0, 2, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(
+            svg_widget,
+            0,
+            2,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+        )
 
         # Add dummy widgets for better control
-        layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum), 0, 1)
-        layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding), 2, 0)
+        layout.addItem(
+            QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum),
+            0,
+            1,
+        )
+        layout.addItem(
+            QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding),
+            2,
+            0,
+        )
 
         # Set layout spacing and margins
         layout.setContentsMargins(10, 0, 10, 0)
@@ -98,7 +135,7 @@ class FileNameWithTick(QWidget):
         layout = QHBoxLayout()
 
         # Tick SVG on the left
-        self.tick_svg = QSvgWidget("icons/Tick.svg")
+        self.tick_svg = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Tick.svg"))
         self.tick_svg.setFixedSize(24, 24)  # Set desired size for the tick mark SVG
         layout.addWidget(self.tick_svg)
 
@@ -121,11 +158,84 @@ class FileNameWithTick(QWidget):
         self.hide()
 
 
+class SpinnerWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.angle = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_spinner)
+
+    def start(self):
+        self.angle = 0
+        self.timer.start(50)  # Update every 50ms
+
+    def stop(self):
+        self.timer.stop()
+        self.update()  # Ensure the spinner stops being drawn
+
+    def update_spinner(self):
+        self.angle = (self.angle + 10) % 360
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        size = self.size()
+        center = size.width() // 2, size.height() // 2
+        radius = min(center) - 5
+
+        pen = QPen(QColor(0, 255, 0), 4)
+        painter.setPen(pen)
+        painter.translate(*center)
+        painter.rotate(self.angle)
+        painter.drawArc(
+            -radius, -radius, 2 * radius, 2 * radius, 0 * 16, 90 * 16
+        )  # Draw an arc
+
+        painter.end()
+
+
+class FileNameWithSpinner(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.file_name_label = None
+        self.spinner_widget = None
+        self.initUI()
+
+    def initUI(self):
+        layout = QHBoxLayout()
+
+        # Spinner widget on the left
+        self.spinner_widget = SpinnerWidget()
+        self.spinner_widget.setFixedSize(40, 40)
+        layout.addWidget(self.spinner_widget)
+
+        # Summarising text on the right
+        self.file_name_label = QLabel("Summarising")
+        self.file_name_label.setStyleSheet(
+            "font-family: 'Inter'; font-size: 14px; color: black;"  # Adjust size and color as needed
+        )
+        layout.addWidget(self.file_name_label)
+
+        self.setLayout(layout)
+        self.hide()  # Initially hide the widget
+
+    def start_loading(self):
+        self.spinner_widget.start()
+        self.show()
+
+    def stop_loading(self):
+        self.spinner_widget.stop()
+        self.hide()
+
+
 class HoverButton(QPushButton):
     def __init__(self, text):
         super().__init__(text)
         self.normal_style = (
-            f"background: none; border: none; border-radius: 8px; font: 16px 'Inter'; color: {colors.purple};"
+            f"background: none; border: none; border-radius: 8px; "
+            f"font: 16px 'Inter'; color: {colors.purple};"
         )
         self.hover_style = (
             f"background-color: {colors.grey}; border: none; border-radius: 8px;"
@@ -156,14 +266,52 @@ class HoverButton(QPushButton):
         self.setStyleSheet(self.normal_style)
 
 
+class SummarizationWorker(QThread):
+    summarization_done = pyqtSignal(str)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, text, total_pages, summary_level, n_processes):
+        super().__init__()
+        self.text = text
+        self.total_pages = total_pages
+        self.summary_level = summary_level
+        self.n_processes = n_processes
+        self.pipeline = SummarizationPipeline()
+
+    def run(self):
+        try:
+            # Check system hardware
+            gpu_available, _ = SystemChecker.check_hardware()
+            device = 'cuda' if gpu_available else 'cpu'
+
+            # Summarize the text
+            if gpu_available:
+                # Use GPU for summarization
+                summary = self.pipeline.summarize(self.text, self.summary_level, device=device)
+            else:
+                # Use CPU for summarization
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self.pipeline.summarize, self.text, self.summary_level, device=device)
+                    summary = future.result()
+
+            self.summarization_done.emit(summary)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
 class BottomRightWidget(RoundedRectWidget):
     def __init__(self, parent_layout, color):
         super().__init__(color)
         self.parent_layout = parent_layout
         self.file_path = None
         self.file_label = None
+        self.file_name_with_spinner = FileNameWithSpinner()
         self.upload_button = None
-        self.output_path = 'raw_text.txt'
+        self.worker = None
+        self.text_extractor = (
+            TextExtractor()
+        )  # Initialize the TextExtractor without a file path
+        self.pipeline = SummarizationPipeline()
         self.initUI()
 
     def initUI(self):
@@ -172,24 +320,24 @@ class BottomRightWidget(RoundedRectWidget):
         layout.addSpacing(30)
 
         # Add title at the top center
-        title = CustomTextLabel(18, 'Inter', 'black', 'UPLOAD YOUR FILE HERE')
+        title = CustomTextLabel(18, "Inter", "black", "UPLOAD YOUR FILE HERE")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(
+            title, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+        )
 
         # Add space between title and SVG image
         layout.addSpacing(100)  # Adjust the amount of spacing as needed
 
         # File Image in the center
-        svg_widget = QSvgWidget("icons/File.svg")
+        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "File.svg"))
         svg_widget.setFixedSize(197, 207)  # Set the desired size of the SVG image
         layout.addWidget(svg_widget, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Button below file image
         self.upload_button = HoverButton("Click or drop a file")
         self.upload_button.clicked.connect(self.open_file_dialog)
-
         layout.addWidget(self.upload_button, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.setLayout(layout)
 
         layout.addSpacing(10)
 
@@ -197,23 +345,37 @@ class BottomRightWidget(RoundedRectWidget):
         self.file_label = FileNameWithTick()
         layout.addWidget(self.file_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # Spinner widget for summarization process
+        layout.addWidget(
+            self.file_name_with_spinner, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         # Subtitle below button
-        subtitle1 = CustomTextLabel(12, 'Inter', colors.light_black,
-                                    'Once the summary has been created your file will\nbe downloaded automatically.')
+        subtitle1 = CustomTextLabel(
+            12,
+            "Inter",
+            colors.light_black,
+            "Once the summary has been created your file will\nbe downloaded automatically.",
+        )
         subtitle1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Spacer to push the buttons to the bottom right
-        layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        layout.addItem(
+            QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        )
 
         # Add clear and summarize buttons at the bottom right
         button_layout = QHBoxLayout()
-        button_layout.addItem(QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        button_layout.addItem(
+            QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
 
         clear_button = QPushButton("Clear")
         clear_button.setStyleSheet(
             f"background-color: {colors.grey}; color: white; font: 16px 'Inter';"
-            f"border-radius: 17px; min-width: 120px;min-height:35px;")
+            f"border-radius: 17px; min-width: 120px;min-height:35px;"
+        )
         button_layout.addWidget(clear_button)
 
         button_layout.addSpacing(10)
@@ -221,7 +383,8 @@ class BottomRightWidget(RoundedRectWidget):
         summarise_button = QPushButton("Summarize")
         summarise_button.setStyleSheet(
             f"background-color: {colors.purple}; color: white; font: 16px 'Inter';"
-            f"border-radius: 17px; min-width: 120px;min-height:35px;")
+            f"border-radius: 17px; min-width: 120px;min-height:35px;"
+        )
         button_layout.addWidget(summarise_button)
 
         # Connect buttons to slots
@@ -237,7 +400,7 @@ class BottomRightWidget(RoundedRectWidget):
 
     def open_file_dialog(self):
         downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
-        print(downloads_path)
+        logging.info(downloads_path)
         pdf_filter = "PDF Files (*.pdf)"
         word_filter = "Word Files (*.doc *.docx)"
 
@@ -248,20 +411,15 @@ class BottomRightWidget(RoundedRectWidget):
             filter_var = pdf_filter
 
         self.file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open File",
-            downloads_path,
-            filter_var
+            self, "Open File", downloads_path, filter_var
         )
 
         if self.file_path:
             # Handle the selected file path
-            print(f"Selected file: {self.file_path}")
+            logging.info(f"Selected file: {self.file_path}")
             self.show_file_info(self.file_path)
 
     def show_file_info(self, filename):
-        # TODO: Need to check file limitations logic (need to add a filetype checker python file )
-
         file_checker = FileChecker(filename)
         file_type = self.parent_layout.file_type  # 0 if PDF, 1 if DOCX
 
@@ -278,8 +436,8 @@ class BottomRightWidget(RoundedRectWidget):
             error_box.exec()
             return
 
-        text_extractor = TextExtractor(self.output_path)
-        success = text_extractor.save_text(file_checker.extracted_text)
+        # Save text into the in-memory text extractor
+        success = self.text_extractor.save_text(file_checker.extracted_text.getvalue())
 
         if not success:
             error_box = QMessageBox()
@@ -297,18 +455,95 @@ class BottomRightWidget(RoundedRectWidget):
         self.file_label.hide_file_info()
         self.upload_button.enable_button()
 
-        try:
-            with open(self.output_path, 'w') as f:
-                f.truncate(0)  # Truncate the file to clear its contents
-        except Exception as e:
-            print(f"Error clearing output file: {str(e)}")
+        # Clear the in-memory text extractor
+        self.text_extractor.text.truncate(0)  # Clear the text buffer
+        logging.info("Text buffer cleared.")
 
     def summarize_file(self):
         if self.file_path:
-            # TODO: Implement file summarization logic
-            pass
+            try:
+                # Hide the tick mark widget and show the spinner immediately
+                self.file_label.hide_file_info()
+                self.file_name_with_spinner.start_loading()
+
+                summary_level = self.parent_layout.summary_type
+                summary_levels = {0: "short", 1: "medium", 2: "long"}
+
+                # Check the file and extract text
+                file_checker = FileChecker(self.file_path)
+                valid, message = file_checker.check_file()
+                if not valid:
+                    logging.error(message)
+                    self.file_name_with_spinner.stop_loading()  # Stop spinner if file is invalid
+                    return
+
+                # Get the text from the file checker
+                text = file_checker.extracted_text.getvalue()
+                total_pages = file_checker.total_pages
+
+                # Check system hardware
+                gpu_available, cpu_cores = SystemChecker.check_hardware()
+                n_processes = cpu_cores if not gpu_available else 1
+
+                # Create and start the worker thread
+                self.worker = SummarizationWorker(
+                    text,
+                    total_pages,
+                    summary_levels[summary_level],
+                    n_processes
+                )
+                self.worker.summarization_done.connect(self.handle_summary_done)
+                self.worker.error_occurred.connect(self.handle_summary_error)
+                self.worker.start()
+
+            except Exception as e:
+                logging.error(f"An error occurred: {e}")
+                self.file_name_with_spinner.stop_loading()  # Stop spinner if an error occurs
         else:
-            print("No file selected.")
+            logging.info("No file selected.")
+
+    def handle_summary_done(self, summary):
+        # Extract the base name of the file path
+        base_name = os.path.basename(self.file_path)
+
+        # Use regular expressions to find the first "word"
+        match = re.search(r"\w+", base_name)
+        first_word = match.group(0) if match else "summary"
+
+        # Create the output file name with _summarised prefix
+        output_file_name = f"{first_word}_summarised.txt"
+
+        # Use for production of app
+        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+        # Use for testing summariser
+        # downloads_path = SCRIPT_DIR
+
+        output_file_path = os.path.join(downloads_path, output_file_name)
+
+        # Write the summary to the file
+        try:
+            with open(output_file_path, "w", encoding="utf-8") as output_file:
+                output_file.write(summary)
+            logging.info(f"Summary written to {output_file_path}")
+        except IOError as e:
+            logging.error(f"Failed to write summary to file: {e}")
+            self.handle_summary_error("Failed to write summary to file.")
+
+        # Stop the spinner and show the tick mark widget
+        self.file_name_with_spinner.stop_loading()
+        self.file_label.show_file_info(self.file_path)
+
+    def handle_summary_error(self, error_message):
+        logging.error(f"An error occurred: {error_message}")
+
+        # Stop the spinner
+        self.file_name_with_spinner.stop_loading()
+        error_box = QMessageBox()
+        error_box.setIcon(QMessageBox.Icon.Warning)
+        error_box.setText(error_message)
+        error_box.setWindowTitle("Summarization Error")
+        error_box.exec()
 
 
 # Custom slider widget
@@ -319,7 +554,7 @@ class Slider(QWidget):
         super().__init__()
         layout = QHBoxLayout()
 
-        turtle = QSvgWidget("icons/Min.svg")
+        turtle = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Min.svg"))
         turtle.setFixedSize(20, 20)
         layout.addWidget(turtle)
 
@@ -342,10 +577,12 @@ class Slider(QWidget):
             }
             """
         )
-        self.wheel.valueChanged.connect(self.emitValueChanged)  # Connect value changed signal
+        self.wheel.valueChanged.connect(
+            self.emitValueChanged
+        )  # Connect value changed signal
         layout.addWidget(self.wheel)
 
-        hare = QSvgWidget("icons/Max.svg")
+        hare = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Max.svg"))
         hare.setFixedSize(20, 20)
         layout.addWidget(hare)
 
@@ -375,8 +612,12 @@ class BottomLeftWidget(RoundedRectWidget):
         self.word_button = QPushButton("Word")
 
         # Set default styles
-        self.pdf_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
-        self.word_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+        self.pdf_button.setStyleSheet(
+            f"background-color: {colors.button_black}; color: white;"
+        )
+        self.word_button.setStyleSheet(
+            f"background-color: {colors.button_grey}; color: {colors.black};"
+        )
 
         # Connect buttons to functions
         self.pdf_button.clicked.connect(self.show_pdf_image)
@@ -391,7 +632,7 @@ class BottomLeftWidget(RoundedRectWidget):
         layout.addSpacing(100)
 
         # Add your widgets here
-        label1 = CustomTextLabel(20, 'Inter', 'black', 'SELECT THE RANGE')
+        label1 = CustomTextLabel(20, "Inter", "black", "SELECT THE RANGE")
         label1.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(label1)
 
@@ -400,13 +641,20 @@ class BottomLeftWidget(RoundedRectWidget):
         # Create a horizontal layout for the slider widget
         slider_layout = QHBoxLayout()
         self.slider = Slider()
-        self.slider.valueChanged.connect(self.updateSummaryType)  # Connect slider valueChanged signal
+        self.slider.valueChanged.connect(
+            self.updateSummaryType
+        )  # Connect slider valueChanged signal
         slider_layout.addWidget(self.slider)
 
         slider_layout.setContentsMargins(20, 0, 20, 0)
         layout.addLayout(slider_layout)
 
-        self.label2 = CustomTextLabel(12, 'Inter', colors.light_black, 'Files must be in PDF format and under 10 MB')
+        self.label2 = CustomTextLabel(
+            12,
+            "Inter",
+            colors.light_black,
+            "Files must be in PDF format and under 10 MB",
+        )
         self.label2.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.label2)
 
@@ -421,17 +669,27 @@ class BottomLeftWidget(RoundedRectWidget):
         limitation_layout = QVBoxLayout()
 
         # Limitation section labels
-        bottom_label_title = CustomTextLabel(12, 'Inter', 'red', 'NOTE:')
+        bottom_label_title = CustomTextLabel(12, "Inter", "red", "NOTE:")
         bottom_label_title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        bottom_label_title.setFont(QFont('Inter', 12, italic=True, ))  # Set italic style here
+        bottom_label_title.setFont(
+            QFont(
+                "Inter",
+                12,
+                italic=True,
+            )
+        )  # Set italic style here
         limitation_layout.addWidget(bottom_label_title)
 
-        bottom_label = CustomTextLabel(12, 'Inter', 'black',
-                                       "1. File should be only in English\n"
-                                       "2. File must have less than or equal to 50 pages only.\n"
-                                       "3. File can only be of Word or PDF format.")
+        bottom_label = CustomTextLabel(
+            12,
+            "Inter",
+            "black",
+            "1. File should be only in English\n"
+            "2. File must have less than or equal to 50 pages only.\n"
+            "3. File can only be of Word or PDF format.",
+        )
         bottom_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        bottom_label.setFont(QFont('Inter', 12, italic=True))  # Set italic style here
+        bottom_label.setFont(QFont("Inter", 12, italic=True))  # Set italic style here
         limitation_layout.addWidget(bottom_label)
 
         # Set spacing between items in limitation_layout
@@ -443,42 +701,51 @@ class BottomLeftWidget(RoundedRectWidget):
 
         self.setLayout(layout)
 
+    @staticmethod
+    def load_and_scale_pixmap(png_path):
+        pixmap = QPixmap(png_path)
+        if pixmap.isNull():
+            logging.error(f"Failed to load image: {png_path}")
+        else:
+            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+            return pixmap
+        return None
+
     def show_pdf_image(self):
-        self.pdf_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
+        self.pdf_button.setStyleSheet(
+            f"background-color: {colors.button_black}; color: white;"
+        )
         self.pdf_button.setText("\u2714 PDF")
-        self.word_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+        self.word_button.setStyleSheet(
+            f"background-color: {colors.button_grey}; color: {colors.black};"
+        )
         self.word_button.setText("Word")
 
         self.label2.setText("Files must be in PDF format and under 10 MB")
 
         # Load and display the PDF image
-        png_path = "assets/Summarised.png"
-        pixmap = QPixmap(png_path)
-        if pixmap.isNull():
-            print(f"Failed to load image: {png_path}")
-        else:
-            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+        png_path = os.path.join(SCRIPT_DIR, "assets", "Summarised.png")
+        pixmap = self.load_and_scale_pixmap(png_path)
+        if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Set the file_type value
-        self.parent_layout.file_type = 0
-
     def show_word_image(self):
-        self.pdf_button.setStyleSheet(f"background-color: {colors.button_grey}; color: {colors.black};")
+        self.pdf_button.setStyleSheet(
+            f"background-color: {colors.button_grey}; color: {colors.black};"
+        )
         self.pdf_button.setText("PDF")
-        self.word_button.setStyleSheet(f"background-color: {colors.button_black}; color: white;")
+        self.word_button.setStyleSheet(
+            f"background-color: {colors.button_black}; color: white;"
+        )
         self.word_button.setText("\u2714 Word")
 
         self.label2.setText("Files must be in Word format and under 10 MB")
 
         # Load and display the Word image
-        png_path = "assets/Word.png"
-        pixmap = QPixmap(png_path)
-        if pixmap.isNull():
-            print(f"Failed to load image: {png_path}")
-        else:
-            pixmap = pixmap.scaled(197, 207, Qt.AspectRatioMode.KeepAspectRatio)
+        png_path = os.path.join(SCRIPT_DIR, "assets", "Word.png")
+        pixmap = self.load_and_scale_pixmap(png_path)
+        if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -513,9 +780,11 @@ class BottomLayout(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
         self.setWindowTitle("Summariser")
         self.setGeometry(100, 100, 1000, 800)
 
+        # Assuming RoundedRectWidget, TopWidget, BottomLayout are defined elsewhere
         main_widget = RoundedRectWidget(colors.grey)
         self.setCentralWidget(main_widget)
 
@@ -529,8 +798,6 @@ class MainWindow(QMainWindow):
         self.bottom_widget = BottomLayout()
         main_layout.addWidget(self.bottom_widget, 4)  # Add stretch factor directly here
 
-        app.aboutToQuit.connect(self.clear_file_on_exit)
-
     def resizeEvent(self, event):
         QMainWindow.resizeEvent(self, event)
 
@@ -538,21 +805,9 @@ class MainWindow(QMainWindow):
         top_widget_height = self.height() // 7
         self.top_widget.setFixedHeight(top_widget_height)
 
-    def clear_file_on_exit(self):
-        # Code to clear the file if it contains text
-        output_path = 'raw_text.txt'
-        if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
-            try:
-                with open(output_path, 'w') as f:
-                    f.truncate(0)  # Clear the file contents
-                print(f"Cleared {output_path} on application exit.")
-            except Exception as e:
-                print(f"Error clearing {output_path}: {e}")
-        else:
-            print(f"{output_path} is either empty or does not exist, no action taken.")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
+    freeze_support()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
