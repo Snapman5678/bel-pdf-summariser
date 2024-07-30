@@ -95,16 +95,6 @@ class TopWidget(RectWidget):
         )
         layout.addWidget(title_text, 1, 0)
 
-        # Add SVG image to the top right
-        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Menu_toggle.svg"))
-        svg_widget.setFixedSize(25, 25)  # Set the desired size of the SVG image
-        layout.addWidget(
-            svg_widget,
-            0,
-            2,
-            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
-        )
-
         # Add dummy widgets for better control
         layout.addItem(
             QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum),
@@ -473,23 +463,25 @@ class BottomRightWidget(RoundedRectWidget):
     def summarize_file(self):
         if self.file_path:
             try:
+                # Hide the tick mark widget and start the spinner immediately
+                self.file_label.hide_file_info()
+                self.file_name_with_spinner.start_loading()
+                QApplication.processEvents()  # Ensure the spinner is visible immediately
+    
                 summary_level = self.parent_layout.summary_type
                 summary_levels = {0: "short", 1: "medium", 2: "long"}
-
+    
                 # Check the file and extract text
                 file_checker = FileChecker(self.file_path)
                 valid, message = file_checker.check_file()
                 if not valid:
                     logging.error(message)
+                    self.file_name_with_spinner.stop_loading()  # Stop spinner if file is invalid
                     return
 
                 # Get the text from the file checker
                 text = file_checker.extracted_text.getvalue()
                 total_pages = file_checker.total_pages
-
-                # Hide the tick mark widget and show the spinner
-                self.file_label.hide_file_info()
-                self.file_name_with_spinner.start_loading()
 
                 # Check system hardware
                 gpu_available, cpu_cores = SystemChecker.check_hardware()
@@ -497,9 +489,9 @@ class BottomRightWidget(RoundedRectWidget):
 
                 # Create and start the worker thread
                 self.worker = SummarizationWorker(
-                    text, 
-                    total_pages, 
-                    summary_levels[summary_level], 
+                    text,
+                    total_pages,
+                    summary_levels[summary_level],
                     n_processes
                 )
                 self.worker.summarization_done.connect(self.handle_summary_done)
@@ -508,6 +500,7 @@ class BottomRightWidget(RoundedRectWidget):
 
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
+                self.file_name_with_spinner.stop_loading()  # Stop spinner if an error occurs
         else:
             logging.info("No file selected.")
 
@@ -738,6 +731,9 @@ class BottomLeftWidget(RoundedRectWidget):
         if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Set the file_type value
+        self.parent_layout.file_type = 0
 
     def show_word_image(self):
         self.pdf_button.setStyleSheet(
