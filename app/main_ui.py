@@ -95,15 +95,6 @@ class TopWidget(RectWidget):
         )
         layout.addWidget(title_text, 1, 0)
 
-        # Add SVG image to the top right
-        svg_widget = QSvgWidget(os.path.join(SCRIPT_DIR, "icons", "Menu_toggle.svg"))
-        svg_widget.setFixedSize(25, 25)  # Set the desired size of the SVG image
-        layout.addWidget(
-            svg_widget,
-            0,
-            2,
-            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
-        )
 
         # Add dummy widgets for better control
         layout.addItem(
@@ -355,7 +346,7 @@ class BottomRightWidget(RoundedRectWidget):
             12,
             "Inter",
             colors.light_black,
-            "Once the summary has been created your file will\nbe downloaded automatically.",
+            "Once the summary has been created your file will\nbe automatically sent to /Downloads.",
         )
         subtitle1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle1, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -465,6 +456,7 @@ class BottomRightWidget(RoundedRectWidget):
                 # Hide the tick mark widget and show the spinner immediately
                 self.file_label.hide_file_info()
                 self.file_name_with_spinner.start_loading()
+                QApplication.processEvents()
 
                 summary_level = self.parent_layout.summary_type
                 summary_levels = {0: "short", 1: "medium", 2: "long"}
@@ -729,6 +721,9 @@ class BottomLeftWidget(RoundedRectWidget):
         if pixmap:
             self.label_image.setPixmap(pixmap)
             self.label_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Set the file_type value
+        self.parent_layout.file_type = 1
 
     def show_word_image(self):
         self.pdf_button.setStyleSheet(

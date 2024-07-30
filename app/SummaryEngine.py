@@ -65,10 +65,11 @@ class ImprovedAbstractiveSummarizer:
                         attention_mask[0][i:i + len(term_ids)] = 2
             inputs['attention_mask'] = attention_mask
 
+        # Increase max_length to avoid the error
         summary_ids = self.model.generate(
             inputs['input_ids'],
             attention_mask=inputs['attention_mask'],
-            max_length=max_length,
+            max_new_tokens=max_length,  
             min_length=min_length,
             length_penalty=2.0,
             num_beams=4,
