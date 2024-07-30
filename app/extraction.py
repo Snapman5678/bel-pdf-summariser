@@ -178,6 +178,29 @@ class TextPreprocessor:
         pool.join()
         return "\n\n".join(preprocessed_chunks)
 
+class TextPreprocessor:
+    def __init__(self):
+        pass
+
+    def preprocess(self, text):
+        preprocessed_text = text.lower()
+        preprocessed_text = "".join(
+            [char for char in preprocessed_text if char.isalnum() or char.isspace()]
+        )
+        return preprocessed_text
+
+    def process_in_parallel(self, text, n_processes):
+        # Split text into chunks and process in parallel
+        chunks = text.split(
+            "\n\n"
+        )  # Assuming paragraphs are separated by double newlines
+        pool = multiprocessing.Pool(processes=n_processes)
+        preprocessed_chunks = pool.map(self.preprocess, chunks)
+        pool.close()
+        pool.join()
+        return "\n\n".join(preprocessed_chunks)
+
+
 class SystemChecker:
     @staticmethod
     def check_hardware():
